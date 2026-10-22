@@ -487,19 +487,11 @@
         </div>
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-white border-t border-slate-200 py-4 mt-auto">
-        <div class="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500">
-            <strong>રાધાસવામી એજ્યુકેશન (Radhaswami Education)</strong> &copy; 2026 - Cloud Sales & Admission Management System
-        </div>
-    </footer>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
-    <!-- Firebase & Application Logic Script -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
+    <script>
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'radhaswami-sales-app';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
             apiKey: "AIzaSyD8IzNdOfiwvmPaduXjPwrWeDE0xhznsk4",
@@ -511,9 +503,11 @@
             measurementId: "G-3J5RW5HSHB"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
 
         let reports = [];
         let filteredReports = [];
@@ -539,15 +533,15 @@
 
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
+                    await auth.signInWithCustomToken(__initial_auth_token);
                 } else {
-                    await signInAnonymously(auth);
+                    await auth.signInAnonymously();
                 }
             } catch (err) {
                 console.warn("Cloud Auth Notice:", err);
             }
 
-            onAuthStateChanged(auth, (user) => {
+            auth.onAuthStateChanged((user) => {
                 if (user) {
                     document.getElementById('statusText').innerText = "Cloud Synced";
                     listenToCloudData();
@@ -671,8 +665,8 @@
 
         function listenToCloudData() {
             try {
-                const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'sales_reports');
-                onSnapshot(colRef, (snapshot) => {
+                const ref = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('sales_reports');
+                ref.onSnapshot((snapshot) => {
                     reports = [];
                     snapshot.forEach(docSnap => {
                         reports.push({ id: docSnap.id, ...docSnap.data() });
@@ -680,421 +674,3 @@
                     reports.sort((a, b) => new Date(b.date) - new Date(a.date));
                     updateStaffDropdown();
                     applyFilters();
-                }, (err) => console.error("Cloud report sync error:", err));
-            } catch(e) {
-                console.error("Firestore initialization error:", e);
-            }
-        }
-
-        function listenToStaffData() {
-            try {
-                const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'staff_users');
-                onSnapshot(colRef, (snapshot) => {
-                    cloudStaffList = [];
-                    snapshot.forEach(docSnap => {
-                        cloudStaffList.push({ id: docSnap.id, ...docSnap.data() });
-                    });
-                    renderStaffManagementList();
-                    updateStaffDropdown();
-                }, (err) => console.error("Cloud staff sync error:", err));
-            } catch(e) {
-                console.error("Staff collection error:", e);
-            }
-        }
-
-        function updateStaffDropdown() {
-            const staffSelect = document.getElementById('filterDashboardStaff');
-            if (!staffSelect) return;
-
-            const existingVal = staffSelect.value;
-            staffSelect.innerHTML = '<option value="ALL">તમામ સ્ટાફ મર્જ ડેટા (All Merged)</option>';
-
-            const staffNames = new Set();
-            staticUsers.forEach(u => staffNames.add(u.name));
-            cloudStaffList.forEach(u => staffNames.add(u.name));
-            reports.forEach(r => { if (r.staffName) staffNames.add(r.staffName); });
-
-            staffNames.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name;
-                staffSelect.appendChild(opt);
-            });
-
-            if (existingVal && Array.from(staffSelect.options).some(o => o.value === existingVal)) {
-                staffSelect.value = existingVal;
-            }
-        }
-
-        async function handleAddStaff(e) {
-            e.preventDefault();
-            const fullName = document.getElementById('newStaffFullName').value.trim();
-            const branch = document.getElementById('newStaffBranch').value;
-            const username = document.getElementById('newStaffUsername').value.trim().toLowerCase();
-            const password = document.getElementById('newStaffPassword').value.trim();
-
-            if (!fullName || !username || !password) {
-                showToast("બધી વિગતો ભરો!");
-                return;
-            }
-
-            const existsInStatic = staticUsers.some(u => u.username.toLowerCase() === username);
-            const existsInCloud = cloudStaffList.some(u => u.username.toLowerCase() === username);
-
-            if (existsInStatic || existsInCloud) {
-                showToast("આ Username પહેલાથી જ વાપરવામાં આવેલું છે!");
-                return;
-            }
-
-            const staffPayload = {
-                name: fullName,
-                branch: branch,
-                username: username,
-                password: password,
-                role: 'staff',
-                createdAt: new Date().toISOString()
-            };
-
-            try {
-                const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'staff_users');
-                await addDoc(colRef, staffPayload);
-                showToast(`નવો સ્ટાફ '${fullName}' ક્લાઉડમાં સાચવવામાં આવ્યો!`);
-                document.getElementById('addStaffForm').reset();
-            } catch (err) {
-                console.error("Add Staff Error:", err);
-                showToast("સ્ટાફ ઉમેરવામાં ભૂલ આવી!");
-            }
-        }
-
-        function renderStaffManagementList() {
-            const tbody = document.getElementById('staffListTableBody');
-            const badge = document.getElementById('staffCountBadge');
-            tbody.innerHTML = '';
-
-            const allStaff = [
-                ...staticUsers.filter(u => u.role === 'staff').map(u => ({ ...u, isStatic: true })),
-                ...cloudStaffList.map(u => ({ ...u, isStatic: false }))
-            ];
-
-            badge.innerText = `${allStaff.length} સ્ટાફ`;
-
-            if (allStaff.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" class="py-3 text-center text-slate-500">કોઈ સ્ટાફ નથી</td></tr>`;
-                return;
-            }
-
-            allStaff.forEach(s => {
-                const tr = document.createElement('tr');
-                tr.className = "hover:bg-slate-700/40 transition";
-                tr.innerHTML = `
-                    <td class="py-2.5 font-bold text-white">${escapeHtml(s.name)}</td>
-                    <td class="py-2.5 text-slate-300 text-[11px]">${escapeHtml(s.branch || 'Main Branch')}</td>
-                    <td class="py-2.5 font-mono text-amber-300">${escapeHtml(s.username)}</td>
-                    <td class="py-2.5 text-center">
-                        ${!s.isStatic ? `
-                            <button onclick="deleteStaff('${s.id}')" class="text-red-400 hover:text-red-300 p-1" title="Delete Staff">
-                                <i class="fa-solid fa-trash-can"></i>
-                            </button>
-                        ` : `<span class="text-slate-500 text-[10px]">ડિફોલ્ટ</span>`}
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        window.deleteStaff = async function(staffDocId) {
-            try {
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'staff_users', staffDocId);
-                await deleteDoc(docRef);
-                showToast("સ્ટાફ સફળતાપૂર્વક ડિલીટ થયો!");
-            } catch (err) {
-                console.error("Delete Staff Error:", err);
-                showToast("ડિલીટ કરવામાં ભૂલ આવી!");
-            }
-        };
-
-        async function handleFormSubmit(e) {
-            e.preventDefault();
-            const submitBtn = document.getElementById('submitBtn');
-            const submitBtnText = document.getElementById('submitBtnText');
-            submitBtn.disabled = true;
-            submitBtnText.innerText = editingReportId ? "અપડેટ થઈ રહ્યું છે..." : "સેવ થઈ રહ્યું છે...";
-
-            const reportPayload = {
-                staffName: document.getElementById('staffName').value.trim(),
-                branch: document.getElementById('branchName').value,
-                courseCategory: document.getElementById('courseCategory').value,
-                date: document.getElementById('reportDate').value,
-                calls: parseInt(document.getElementById('callsCount').value) || 0,
-                tillTodayCalls: parseInt(document.getElementById('tillTodayCallsCount').value) || 0,
-                leads: parseInt(document.getElementById('inquiryCount').value) || 0,
-                admissions: parseInt(document.getElementById('admissionsCount').value) || 0,
-                booking: parseInt(document.getElementById('bookingCount').value) || 0,
-                amount: parseFloat(document.getElementById('amountCollected').value) || 0,
-                billing: parseFloat(document.getElementById('billingAmount').value) || 0,
-                bookingCollection: parseFloat(document.getElementById('bookingCollection').value) || 0,
-                bookingBilling: parseFloat(document.getElementById('bookingBilling').value) || 0,
-                taskDetails: document.getElementById('taskDetails').value.trim(),
-                remarks: document.getElementById('taskRemarks').value.trim(),
-                updatedAt: new Date().toISOString()
-            };
-
-            try {
-                if (editingReportId) {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sales_reports', editingReportId);
-                    await updateDoc(docRef, reportPayload);
-                    showToast("સેલ્સ રિપોર્ટ સફળતાપૂર્વક અપડેટ થયો!");
-                } else {
-                    reportPayload.createdAt = new Date().toISOString();
-                    reportPayload.createdBy = currentUser ? currentUser.username : 'guest';
-                    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'sales_reports');
-                    await addDoc(colRef, reportPayload);
-                    showToast("સેલ્સ રિપોર્ટ સફળતાપૂર્વક ક્લાઉડમાં સેવ થયો!");
-                }
-
-                resetFormMode();
-            } catch (err) {
-                console.error("Save/Update Error:", err);
-                showToast("સેવ/અપડેટ કરતી વખતે ભૂલ આવી!");
-            } finally {
-                submitBtn.disabled = false;
-            }
-        }
-
-        window.editReport = function(docId) {
-            const report = reports.find(r => r.id === docId);
-            if (!report) return;
-
-            editingReportId = docId;
-
-            document.getElementById('staffName').value = report.staffName || (currentUser ? currentUser.name : '');
-            document.getElementById('branchName').value = report.branch || 'મુખ્ય શાખા (Main Branch)';
-            document.getElementById('courseCategory').value = report.courseCategory || 'કમ્પ્યુટર કોર્સેસ (Computer Courses)';
-            document.getElementById('reportDate').value = report.date || new Date().toISOString().split('T')[0];
-            document.getElementById('inquiryCount').value = report.leads || 0;
-            document.getElementById('admissionsCount').value = report.admissions || 0;
-            document.getElementById('bookingCount').value = report.booking || 0;
-            document.getElementById('callsCount').value = report.calls || 0;
-            document.getElementById('tillTodayCallsCount').value = report.tillTodayCalls || 0;
-            document.getElementById('amountCollected').value = report.amount || 0;
-            document.getElementById('billingAmount').value = report.billing || 0;
-            document.getElementById('bookingCollection').value = report.bookingCollection || 0;
-            document.getElementById('bookingBilling').value = report.bookingBilling || 0;
-            document.getElementById('taskDetails').value = report.taskDetails || '';
-            document.getElementById('taskRemarks').value = report.remarks || '';
-
-            document.getElementById('submitBtnText').innerText = "અપડેટ કરો (Update Report)";
-            document.getElementById('cancelEditBtn').classList.remove('hidden');
-
-            document.getElementById('staffSection').scrollIntoView({ behavior: 'smooth' });
-        };
-
-        function resetFormMode() {
-            editingReportId = null;
-            
-            document.getElementById('callsCount').value = '';
-            document.getElementById('tillTodayCallsCount').value = '';
-            document.getElementById('inquiryCount').value = '';
-            document.getElementById('admissionsCount').value = '';
-            document.getElementById('bookingCount').value = '';
-            document.getElementById('amountCollected').value = '';
-            document.getElementById('billingAmount').value = '';
-            document.getElementById('bookingCollection').value = '';
-            document.getElementById('bookingBilling').value = '';
-            document.getElementById('taskDetails').value = '';
-            document.getElementById('taskRemarks').value = '';
-            document.getElementById('reportDate').value = new Date().toISOString().split('T')[0];
-
-            if (currentUser && currentUser.role === 'staff') {
-                document.getElementById('staffName').value = currentUser.name;
-            }
-
-            document.getElementById('submitBtnText').innerText = "ક્લાઉડમાં સબમિટ કરો (Save Online)";
-            document.getElementById('cancelEditBtn').classList.add('hidden');
-        }
-
-        window.deleteReport = async function(docId) {
-            try {
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sales_reports', docId);
-                await deleteDoc(docRef);
-                if (editingReportId === docId) resetFormMode();
-                showToast("રિપોર્ટ સફળતાપૂર્વક ડિલીટ થયો!");
-            } catch (err) {
-                console.error("Delete Error:", err);
-                showToast("ડિલીટ કરવામાં ભૂલ આવી!");
-            }
-        };
-
-        function applyFilters() {
-            if (!currentUser) return;
-
-            const searchVal = document.getElementById('filterSearch').value.toLowerCase().trim();
-            const dateVal = document.getElementById('filterDate').value;
-            const selectedMonth = document.getElementById('filterDashboardMonth').value;
-            const branchVal = document.getElementById('filterDashboardBranch').value;
-            const staffVal = document.getElementById('filterDashboardStaff').value;
-
-            filteredReports = reports.filter(r => {
-                if (currentUser.role === 'staff') {
-                    const isMyReport = (r.createdBy === currentUser.username) || (r.staffName === currentUser.name);
-                    if (!isMyReport) return false;
-                }
-
-                const matchesSearch = !searchVal || 
-                    (r.staffName && r.staffName.toLowerCase().includes(searchVal)) ||
-                    (r.branch && r.branch.toLowerCase().includes(searchVal)) ||
-                    (r.courseCategory && r.courseCategory.toLowerCase().includes(searchVal));
-
-                const matchesDate = !dateVal || r.date === dateVal;
-                const matchesMonth = !selectedMonth || (r.date && r.date.startsWith(selectedMonth));
-                const matchesBranch = (branchVal === 'ALL') || (r.branch === branchBranch);
-                
-                const matchesStaff = (currentUser.role === 'staff') 
-                    ? true 
-                    : ((staffVal === 'ALL') || (r.staffName === staffVal));
-
-                return matchesSearch && matchesDate && matchesMonth && matchesBranch && matchesStaff;
-            });
-
-            renderTable(filteredReports);
-            updateStats(filteredReports);
-        }
-
-        function resetFilters() {
-            document.getElementById('filterSearch').value = '';
-            document.getElementById('filterDate').value = '';
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('filterDashboardMonth').value = today.slice(0, 7);
-            document.getElementById('filterDashboardBranch').value = 'ALL';
-            document.getElementById('filterDashboardStaff').value = 'ALL';
-            applyFilters();
-        }
-
-        function renderTable(dataToRender) {
-            const tbody = document.getElementById('reportTableBody');
-            const emptyState = document.getElementById('emptyState');
-            tbody.innerHTML = '';
-
-            if (dataToRender.length === 0) {
-                emptyState.classList.remove('hidden');
-                return;
-            } else {
-                emptyState.classList.add('hidden');
-            }
-
-            dataToRender.forEach(report => {
-                const tr = document.createElement('tr');
-                tr.className = "hover:bg-slate-50/80 transition text-slate-700 border-b border-slate-100";
-
-                const canModify = (currentUser && (currentUser.role === 'admin' || report.createdBy === currentUser.username));
-
-                tr.innerHTML = `
-                    <td class="py-3 px-3 font-medium text-xs text-slate-500 whitespace-nowrap">${formatDate(report.date)}</td>
-                    <td class="py-3 px-3">
-                        <span class="font-bold text-slate-800 block text-xs">${escapeHtml(report.staffName)}</span>
-                        <span class="text-slate-500 text-[11px] block">${escapeHtml(report.branch)}</span>
-                    </td>
-                    <td class="py-3 px-2 text-center font-bold text-amber-600 text-xs">${report.leads || 0}</td>
-                    <td class="py-3 px-2 text-center">
-                        <span class="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded-full font-bold">${report.admissions || 0}</span>
-                    </td>
-                    <td class="py-3 px-2 text-center font-bold text-blue-600 text-xs">${report.booking || 0}</td>
-                    <td class="py-3 px-3 font-extrabold text-emerald-700 text-right text-xs">₹${(report.amount || 0).toLocaleString('en-IN')}</td>
-                    <td class="py-3 px-3 font-bold text-indigo-700 text-right text-xs">₹${(report.billing || 0).toLocaleString('en-IN')}</td>
-                    <td class="py-3 px-3 font-bold text-blue-700 text-right text-xs">₹${(report.bookingCollection || 0).toLocaleString('en-IN')}</td>
-                    <td class="py-3 px-3 font-bold text-purple-700 text-right text-xs">₹${(report.bookingBilling || 0).toLocaleString('en-IN')}</td>
-                    <td class="py-3 px-3 text-center whitespace-nowrap">
-                        ${canModify ? `
-                            <button onclick="editReport('${report.id}')" class="text-indigo-600 hover:text-indigo-800 p-1.5 rounded transition mr-1" title="Edit Entry">
-                                <i class="fa-solid fa-pen-to-square text-sm"></i>
-                            </button>
-                            <button onclick="deleteReport('${report.id}')" class="text-red-500 hover:text-red-700 p-1.5 rounded transition" title="Delete Entry">
-                                <i class="fa-solid fa-trash-can text-sm"></i>
-                            </button>
-                        ` : `<span class="text-slate-300 text-xs">—</span>`}
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        function updateStats(data) {
-            const totalLeads = data.reduce((sum, r) => sum + (parseInt(r.leads) || 0), 0);
-            const totalAdmissions = data.reduce((sum, r) => sum + (parseInt(r.admissions) || 0), 0);
-            const totalBooking = data.reduce((sum, r) => sum + (parseInt(r.booking) || 0), 0);
-            const totalAmount = data.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-            const totalBilling = data.reduce((sum, r) => sum + (parseFloat(r.billing) || 0), 0);
-            const totalBookingCollection = data.reduce((sum, r) => sum + (parseFloat(r.bookingCollection) || 0), 0);
-
-            document.getElementById('statTotalLeads').innerText = totalLeads;
-            document.getElementById('statTotalAdmissions').innerText = totalAdmissions;
-            document.getElementById('statTotalBooking').innerText = totalBooking;
-            document.getElementById('statTotalAmount').innerText = "₹" + totalAmount.toLocaleString('en-IN');
-            document.getElementById('statTotalBilling').innerText = "₹" + totalBilling.toLocaleString('en-IN');
-            document.getElementById('statBookingCollection').innerText = "₹" + totalBookingCollection.toLocaleString('en-IN');
-        }
-
-        function exportToCSV() {
-            if (filteredReports.length === 0) {
-                showToast("એક્સપોર્ટ કરવા માટે કોઈ ડેટા નથી!");
-                return;
-            }
-
-            let csvContent = "data:text/csv;charset=utf-8,ID,Date,Staff Name,Branch,Course,Inquiry,Admission,Booking,Collection,Billing,Booking Collection,Booking Billing,Task Details,Remarks\n";
-
-            filteredReports.forEach(r => {
-                const row = [
-                    `"${r.id}"`,
-                    `"${r.date}"`,
-                    `"${r.staffName}"`,
-                    `"${r.branch}"`,
-                    `"${r.courseCategory}"`,
-                    r.leads || 0,
-                    r.admissions || 0,
-                    r.booking || 0,
-                    r.amount || 0,
-                    r.billing || 0,
-                    r.bookingCollection || 0,
-                    r.bookingBilling || 0,
-                    `"${(r.taskDetails || '').replace(/"/g, '""')}"`,
-                    `"${(r.remarks || '').replace(/"/g, '""')}"`
-                ].join(",");
-                csvContent += row + "\n";
-            });
-
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `Radhaswami_Sales_Report_${new Date().toISOString().split('T')[0]}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            document.getElementById('toastMsg').innerText = msg;
-            toast.classList.remove('hidden');
-            setTimeout(() => {
-                toast.classList.add('hidden');
-            }, 3000);
-        }
-
-        function formatDate(dateStr) {
-            if (!dateStr) return '';
-            const [y, m, d] = dateStr.split('-');
-            return `${d}/${m}/${y}`;
-        }
-
-        function escapeHtml(text) {
-            if (!text) return '';
-            return text
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
-        }
-    </script>
-</body>
-</html>
